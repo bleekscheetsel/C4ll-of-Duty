@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CoD4 Ported">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<title>CoD4 Ported</title>
+<style>
+html,body{margin:0;height:100%;background:#000;color:#cfd2cc;font:15px/1.4 -apple-system,"Segoe UI",Roboto,Arial,sans-serif;overflow:hidden}
+#w{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;box-sizing:border-box;text-align:center}
+img{width:96px;height:96px;border-radius:20px;opacity:.95}
+#t{font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:13px;color:#9db08d}
+#b{width:min(420px,80vw);height:6px;background:#1c1f1b;border-radius:3px;overflow:hidden}
+#f{height:100%;width:0;background:linear-gradient(90deg,#6f8f4f,#a8c27e);transition:width .2s}
+#s{font-size:13px;color:#8a8f86;min-height:2.8em;white-space:pre-line}
+button{background:#2a3125;color:#d9e6c8;border:1px solid #57684a;border-radius:6px;padding:10px 18px;font:inherit;display:none}
+</style></head><body>
+<div id="w"><img src="icon-192.png" alt=""><div id="t">Call of Duty 4: Modern Warfare Ported</div><div id="b"><div id="f"></div></div><div id="s">Starting...</div><button id="r">Try again</button></div>
+<script>
+/* Starter for the web version on a website (https):
+   - downloads the game in parts once (parts.json), checks it, unpacks it and keeps it on this device (Cache Storage)
+   - next time it starts straight from the device, also without internet; a new version on the site is downloaded once
+   - the game itself runs on the same https address, so the microphone, storage and the update file keep working */
+const S=document.getElementById('s'), F=document.getElementById('f'), R=document.getElementById('r');
+const say=(t,p)=>{ S.textContent=t; if(p!=null)F.style.width=Math.round(p*100)+'%'; };
+R.onclick=()=>location.reload();
+async function sha256(buf){ const h=await crypto.subtle.digest('SHA-256',buf); return [...new Uint8Array(h)].map(b=>b.toString(16).padStart(2,'0')).join(''); }
+async function gunzip(blob){
+  if('DecompressionStream' in window){ return await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).blob(); }
+  throw new Error('This browser cannot unpack the game (update iOS / the browser).'); }
+function launch(blob){ say('Loading the game...',1); const u=URL.createObjectURL(new Blob([blob],{type:'text/html'})); location.replace(u); }
+async function main(){
+  let man=null; try{ const r=await fetch('parts.json',{cache:'no-store'}); if(r.ok)man=await r.json(); }catch(e){}
+  const cache=('caches' in window)?await caches.open('cod4-ported'):null;
+  const key='game-'+(man?man.ver+'-'+man.sha.slice(0,12):'');
+  if(cache){
+    if(man){ const hit=await cache.match(key); if(hit){ say('Starting from this device...',1); return launch(await hit.blob()); } }
+    else { const keys=await cache.keys(); const k=keys.map(r=>new URL(r.url).pathname.split('/').pop()).filter(n=>n.startsWith('game-')).sort().pop();
+      if(k){ const hit=await cache.match(k); if(hit){ say('Offline: starting from this device...',1); return launch(await hit.blob()); } } }
+  }
+  if(!man)throw new Error('No internet and the game is not on this device yet.');
+  const parts=[]; let got=0;
+  for(let i=1;i<=man.n;i++){
+    const name=man.parts[i-1]; let buf=null;
+    for(let tries=0;tries<3&&!buf;tries++){ try{
+      const r=await fetch(name,{cache:'no-store'}); if(!r.ok)throw new Error(r.status);
+      const rd=r.body.getReader(), chunks=[]; let n=0;
+      for(;;){ const {done,value}=await rd.read(); if(done)break; chunks.push(value); n+=value.length; say('Downloading the game (once): part '+i+' of '+man.n+'\n'+Math.round((got+n)/1048576)+' of '+Math.round(man.size/1048576)+' MB',(got+n)/man.size*.9); }
+      buf=await new Blob(chunks).arrayBuffer();
+    }catch(e){ say('Part '+i+' failed, trying again...'); await new Promise(r=>setTimeout(r,1500)); } }
+    if(!buf)throw new Error('Could not download part '+i+'.');
+    got+=buf.byteLength; parts.push(buf);
+  }
+  say('Checking...',.92); const all=await new Blob(parts).arrayBuffer();
+  if(all.byteLength!==man.size||await sha256(all)!==man.sha)throw new Error('The download is damaged. Try again.');
+  say('Unpacking...',.95); const html=await gunzip(new Blob([all]));
+  if(cache){ try{ for(const r of await cache.keys())await cache.delete(r); await cache.put(key,new Response(html,{headers:{'content-type':'text/html'}})); }catch(e){ console.warn('cache',e); } }
+  launch(html);
+}
+main().catch(e=>{ say(String(e&&e.message||e)); R.style.display='inline-block'; });
+if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
+</script></body></html>
