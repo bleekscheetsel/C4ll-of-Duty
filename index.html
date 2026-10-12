@@ -33,15 +33,21 @@ async function sha256(buf){ const h=await crypto.subtle.digest('SHA-256',buf); r
 async function gunzip(blob){
   if('DecompressionStream' in window){ return await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).blob(); }
   throw new Error('This browser cannot unpack the game (update iOS / the browser).'); }
-function launch(blob){ say('Loading the game...',1); const u=URL.createObjectURL(new Blob([blob],{type:'text/html'})); location.replace(u); }
+async function swReady(){ if(!('serviceWorker' in navigator))return false; try{ await navigator.serviceWorker.register('sw.js'); await navigator.serviceWorker.ready;
+    if(!navigator.serviceWorker.controller)await new Promise(r=>{ navigator.serviceWorker.addEventListener('controllerchange',r,{once:true}); setTimeout(r,4000); });
+    return !!navigator.serviceWorker.controller; }catch(e){ console.warn('sw',e); return false; } }
+async function launch(blob){ say('Loading the game...',1);
+  // via de service worker op het https-adres zelf (game.html): dan werken opnieuw laden en updates in de game
+  if(await swReady()){ location.replace('game.html'); return; }
+  const b=typeof blob==='function'?await blob():blob; const u=URL.createObjectURL(new Blob([b],{type:'text/html'})); location.replace(u); }
 async function main(){
   let man=null; try{ const r=await fetch('parts.json',{cache:'no-store'}); if(r.ok)man=await r.json(); }catch(e){}
   const cache=('caches' in window)?await caches.open('cod4-ported'):null;
   const key='game-'+(man?man.ver+'-'+man.sha.slice(0,12):'');
   if(cache){
-    if(man){ const hit=await cache.match(key); if(hit){ say('Starting from this device...',1); return launch(await hit.blob()); } }
+    if(man){ const hit=await cache.match(key); if(hit){ say('Starting from this device...',1); return launch(()=>hit.blob()); } }
     else { const keys=await cache.keys(); const k=keys.map(r=>new URL(r.url).pathname.split('/').pop()).filter(n=>n.startsWith('game-')).sort().pop();
-      if(k){ const hit=await cache.match(k); if(hit){ say('Offline: starting from this device...',1); return launch(await hit.blob()); } } }
+      if(k){ const hit=await cache.match(k); if(hit){ say('Offline: starting from this device...',1); return launch(()=>hit.blob()); } } }
   }
   if(!man)throw new Error('No internet and the game is not on this device yet.');
   const parts=[]; let got=0;
